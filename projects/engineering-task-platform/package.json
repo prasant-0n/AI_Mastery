@@ -10,7 +10,8 @@
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit",
     "test": "node --test",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "db:migrate": "tsx scripts/migrate.ts"
   },
   "engines": {
     "node": ">=22"
