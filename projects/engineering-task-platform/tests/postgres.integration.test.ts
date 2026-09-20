@@ -60,6 +60,18 @@ test("PostgreSQL persistence round trip and tenant isolation", {
     const orgBTasks = await tasks.listByOrganization(orgB.id, 100, 0);
     assert.equal(orgBTasks.length, 0);
 
+    const crossTenantTask = createTask({
+      id: crypto.randomUUID(),
+      organizationId: orgB.id,
+      createdBy: userA.id,
+      type: "cross_tenant_test",
+    });
+
+    await assert.rejects(
+      () => tasks.create(crossTenantTask),
+      /foreign key|violates/i,
+    );
+
     await pool.query("DELETE FROM tasks WHERE id = $1", [taskA.id]);
     await pool.query("DELETE FROM users WHERE id IN ($1, $2)", [userA.id, userB.id]);
     await pool.query("DELETE FROM organizations WHERE id IN ($1, $2)", [orgA.id, orgB.id]);
