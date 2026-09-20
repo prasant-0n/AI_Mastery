@@ -11,13 +11,15 @@ CREATE TABLE users (
   password_hash TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT users_email_per_organization_unique
-    UNIQUE (organization_id, email)
+    UNIQUE (organization_id, email),
+  CONSTRAINT users_id_organization_unique
+    UNIQUE (id, organization_id)
 );
 
 CREATE TABLE tasks (
   id UUID PRIMARY KEY,
   organization_id UUID NOT NULL REFERENCES organizations(id),
-  created_by UUID NOT NULL REFERENCES users(id),
+  created_by UUID NOT NULL,
   type VARCHAR(100) NOT NULL,
   status VARCHAR(32) NOT NULL,
   input JSONB,
@@ -27,6 +29,9 @@ CREATE TABLE tasks (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   started_at TIMESTAMPTZ,
   completed_at TIMESTAMPTZ,
+  CONSTRAINT tasks_created_by_same_organization
+    FOREIGN KEY (created_by, organization_id)
+    REFERENCES users (id, organization_id),
   CONSTRAINT tasks_attempt_count_non_negative CHECK (attempt_count >= 0),
   CONSTRAINT tasks_status_valid CHECK (
     status IN ('PENDING', 'QUEUED', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED')
