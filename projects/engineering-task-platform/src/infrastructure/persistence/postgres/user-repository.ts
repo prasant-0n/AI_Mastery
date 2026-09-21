@@ -19,13 +19,7 @@ export class PostgresUserRepository implements UserRepository {
          id, organization_id, email, password_hash, created_at
        )
        VALUES ($1, $2, $3, $4, $5)`,
-      [
-        user.id,
-        user.organizationId,
-        user.email,
-        user.passwordHash,
-        user.createdAt,
-      ],
+      [user.id, user.organizationId, user.email, user.passwordHash, user.createdAt],
     );
   }
 
@@ -44,8 +38,24 @@ export class PostgresUserRepository implements UserRepository {
     const result = await this.db.query<UserRow>(
       `SELECT id, organization_id, email, password_hash, created_at
        FROM users
-       WHERE email = $1`,
+       WHERE email = $1
+       ORDER BY created_at ASC
+       LIMIT 1`,
       [email.trim().toLowerCase()],
+    );
+
+    return this.toDomain(result.rows[0]);
+  }
+
+  public async findByOrganizationAndEmail(
+    organizationId: string,
+    email: string,
+  ): Promise<User | null> {
+    const result = await this.db.query<UserRow>(
+      `SELECT id, organization_id, email, password_hash, created_at
+       FROM users
+       WHERE organization_id = $1 AND email = $2`,
+      [organizationId, email.trim().toLowerCase()],
     );
 
     return this.toDomain(result.rows[0]);
