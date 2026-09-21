@@ -1,19 +1,22 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import type { UserRepository } from "../application/repositories.js";
+import type { TokenService } from "../application/token-service.js";
 import { checkReadiness, getHealth } from "../application/health-service.js";
+import { AuthService } from "../application/auth-service.js";
 import { TaskApiService } from "../application/task-api-service.js";
+import { handleAuthRoutes } from "./auth-routes.js";
 import { handleTaskRoutes } from "./task-routes.js";
 
-function sendJson(
-  response: ServerResponse,
-  status: number,
-  body: unknown,
-): void {
+function sendJson(response: ServerResponse, status: number, body: unknown): void {
   response.writeHead(status, { "content-type": "application/json" });
   response.end(JSON.stringify(body));
 }
 
 export function createHttpServer(
   taskApi: TaskApiService,
+  auth: AuthService,
+  users: UserRepository,
+  tokens: TokenService,
   readiness: () => ReturnType<typeof checkReadiness>,
 ): ReturnType<typeof createServer> {
   return createServer(async (request: IncomingMessage, response: ServerResponse) => {
@@ -30,7 +33,17 @@ export function createHttpServer(
       return;
     }
 
-    const handled = await handleTaskRoutes(request, response, taskApi);
+    if (await handleAuthRoutes(request, response, auth)) {
+      return;
+    }
+
+    const handled = await handleTaskRoutes(
+      request,
+      response,
+      taskApi,
+      users,
+      tokens,
+    );
 
     if (!handled) {
       sendJson(response, 404, {
