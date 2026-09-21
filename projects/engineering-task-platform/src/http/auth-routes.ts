@@ -4,8 +4,15 @@ import { AuthService } from "../application/auth-service.js";
 import { ApplicationError, toHttpError } from "../application/http-errors.js";
 import { requireNonEmptyString } from "../application/request-validation.js";
 import { readJsonBody } from "./request-body.js";
+import { failure, success } from "./api-response.js";
 
-function sendJson(response: ServerResponse, status: number, body: unknown): void {
+function sendJson(
+  response: ServerResponse,
+  status: number,
+  body: unknown,
+  requestId: string,
+): void {
+  response.setHeader("x-request-id", requestId);
   response.writeHead(status, { "content-type": "application/json" });
   response.end(JSON.stringify(body));
 }
@@ -14,6 +21,7 @@ export async function handleAuthRoutes(
   request: IncomingMessage,
   response: ServerResponse,
   auth: AuthService,
+  requestId: string,
 ): Promise<boolean> {
   if (!request.url) return false;
 
@@ -22,9 +30,7 @@ export async function handleAuthRoutes(
 
     const path = new URL(request.url, "http://localhost").pathname;
 
-    if (path !== "/auth/login" && path !== "/auth/register") {
-      return false;
-    }
+    if (path !== "/auth/login" && path !== "/auth/register") return false;
 
     const body = await readJsonBody(request);
 
@@ -33,10 +39,7 @@ export async function handleAuthRoutes(
     }
 
     const input = body as Record<string, unknown>;
-    const organizationId = requireNonEmptyString(
-      input.organizationId,
-      "organizationId",
-    );
+    const organizationId = requireNonEmptyString(input.organizationId, "organizationId");
     const email = requireNonEmptyString(input.email, "email");
     const password = requireNonEmptyString(input.password, "password");
 
@@ -47,16 +50,21 @@ export async function handleAuthRoutes(
         email,
         password,
       });
-      sendJson(response, 201, result);
+      sendJson(response, 201, success(result, requestId), requestId);
       return true;
     }
 
     const result = await auth.login(organizationId, email, password);
-    sendJson(response, 200, result);
+    sendJson(response, 200, success(result, requestId), requestId);
     return true;
   } catch (error) {
     const mapped = toHttpError(error);
-    sendJson(response, mapped.status, mapped.body);
+    sendJson(
+      response,
+      mapped.status,
+      failure(mapped.body.error, mapped.body.code, requestId),
+      requestId,
+    );
     return true;
   }
 }
