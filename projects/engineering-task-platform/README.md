@@ -20,9 +20,9 @@ This project is a production-oriented backend laboratory for demonstrating:
 
 ## Current Status
 
-**Milestone 1 — Foundation**
+**Milestone 2 — Core Domain complete.**
 
-This initial scaffold establishes the project boundary and development contracts. Application behavior will be added incrementally.
+The project now has a tested domain model for organizations, users, and tasks, including explicit task lifecycle rules, tenant ownership, lifecycle timestamps, repository boundaries, and PostgreSQL persistence constraints. HTTP authentication and authorization foundations are also present as supporting infrastructure, but later milestones remain incomplete.
 
 ## Engineering Rules
 
@@ -55,15 +55,28 @@ HTTP API
 ## Milestones
 
 - [x] Milestone 1 — Foundation scaffold
-- [ ] Milestone 2 — Core domain
-- [ ] Milestone 3 — API
+- [x] Milestone 2 — Core domain
+- [ ] Milestone 3 — API hardening and contract completion
 - [ ] Milestone 4 — Async processing
 - [ ] Milestone 5 — Reliability
 - [ ] Milestone 6 — Observability
-- [ ] Milestone 7 — Security
+- [ ] Milestone 7 — Security hardening
 - [ ] Milestone 8 — Performance
 - [ ] Milestone 9 — Production documentation
 - [ ] Milestone 10 — Optional AI extension
+
+## Milestone 2 Evidence
+
+- organization domain factory and invariant tests
+- user domain factory and invariant tests
+- task creation invariants
+- complete task transition matrix
+- task attempt counting
+- execution start/completion timestamps
+- explicit domain invariant errors
+- tenant ownership model
+- PostgreSQL cross-tenant foreign-key enforcement
+- repository abstractions separating domain/application from persistence
 
 ## Evidence
 
