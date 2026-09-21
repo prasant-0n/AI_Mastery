@@ -8,6 +8,9 @@ const taskApi = new TaskApiService(container.tasks);
 
 const server = createHttpServer(
   taskApi,
+  container.auth,
+  container.users,
+  container.tokens,
   () => checkReadiness(container),
 );
 
