@@ -13,17 +13,27 @@ export async function authenticateRequest(
   tokens: TokenService,
 ): Promise<AuthenticatedUser> {
   if (!authorization?.startsWith("Bearer ")) {
-    throw new ApplicationError("Authentication required", "BAD_REQUEST");
+    throw new ApplicationError("Authentication required", "UNAUTHORIZED");
   }
 
-  const claims: AccessTokenClaims = tokens.verify(
-    authorization.slice("Bearer ".length),
-  );
+  const token = authorization.slice("Bearer ".length).trim();
+
+  if (!token) {
+    throw new ApplicationError("Authentication required", "UNAUTHORIZED");
+  }
+
+  let claims: AccessTokenClaims;
+
+  try {
+    claims = tokens.verify(token);
+  } catch {
+    throw new ApplicationError("Invalid access token", "UNAUTHORIZED");
+  }
 
   const user = await users.findById(claims.userId);
 
   if (!user || user.organizationId !== claims.organizationId) {
-    throw new ApplicationError("Invalid authenticated identity", "NOT_FOUND");
+    throw new ApplicationError("Invalid authenticated identity", "UNAUTHORIZED");
   }
 
   return {
@@ -37,6 +47,6 @@ export function requireSameOrganization(
   organizationId: string,
 ): void {
   if (authenticated.organizationId !== organizationId) {
-    throw new ApplicationError("Organization access denied", "NOT_FOUND");
+    throw new ApplicationError("Organization access denied", "FORBIDDEN");
   }
 }
