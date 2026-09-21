@@ -24,9 +24,18 @@ export class TaskApiService {
 
   public async transition(id: string, status: TaskStatus) {
     const task = await this.getById(id);
-    const updated = moveTask(task, status);
-    await this.tasks.update(updated);
-    return updated;
+
+    try {
+      const updated = moveTask(task, status);
+      await this.tasks.update(updated);
+      return updated;
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith("Invalid task transition:")) {
+        throw new ApplicationError(error.message, "BAD_REQUEST");
+      }
+
+      throw error;
+    }
   }
 
   public async list(
