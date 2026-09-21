@@ -20,9 +20,9 @@ This project is a production-oriented backend laboratory for demonstrating:
 
 ## Current Status
 
-**Milestone 2 — Core Domain complete.**
+**Milestone 3 — API complete.**
 
-The project now has a tested domain model for organizations, users, and tasks, including explicit task lifecycle rules, tenant ownership, lifecycle timestamps, repository boundaries, and PostgreSQL persistence constraints. HTTP authentication and authorization foundations are also present as supporting infrastructure, but later milestones remain incomplete.
+The service now has a defined HTTP contract, standardized JSON response envelopes, request correlation, authentication semantics, protected tenant-aware task routes, baseline security headers, CORS preflight handling, bounded request bodies, and API contract tests. Production security hardening remains a later milestone.
 
 ## Engineering Rules
 
@@ -56,7 +56,7 @@ HTTP API
 
 - [x] Milestone 1 — Foundation scaffold
 - [x] Milestone 2 — Core domain
-- [ ] Milestone 3 — API hardening and contract completion
+- [x] Milestone 3 — API
 - [ ] Milestone 4 — Async processing
 - [ ] Milestone 5 — Reliability
 - [ ] Milestone 6 — Observability
@@ -65,18 +65,20 @@ HTTP API
 - [ ] Milestone 9 — Production documentation
 - [ ] Milestone 10 — Optional AI extension
 
-## Milestone 2 Evidence
+## Milestone 3 Evidence
 
-- organization domain factory and invariant tests
-- user domain factory and invariant tests
-- task creation invariants
-- complete task transition matrix
-- task attempt counting
-- execution start/completion timestamps
-- explicit domain invariant errors
-- tenant ownership model
-- PostgreSQL cross-tenant foreign-key enforcement
-- repository abstractions separating domain/application from persistence
+- HTTP endpoint contract
+- standardized success/error envelopes
+- stable machine-readable error taxonomy
+- Bearer-token authentication semantics
+- tenant-aware task authorization
+- request ID generation and propagation
+- baseline security response headers
+- CORS preflight handling
+- bounded JSON request bodies
+- API contract tests
+- HTTP integration tests
+- ADR-003 for API contract/versioning
 
 ## Evidence
 
