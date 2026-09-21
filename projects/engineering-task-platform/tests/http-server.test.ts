@@ -66,6 +66,21 @@ test("GET /health returns service health", async () => {
   }
 });
 
+test("GET /ready reports readiness", async () => {
+  const { server, baseUrl } = await startServer();
+
+  try {
+    const response = await fetch(`${baseUrl}/ready`);
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      status: "ready",
+      database: "up",
+    });
+  } finally {
+    server.close();
+  }
+});
+
 test("POST /tasks creates a task", async () => {
   const { server, baseUrl } = await startServer();
 
@@ -119,7 +134,7 @@ test("GET /tasks/:id returns 404 for unknown task", async () => {
   }
 });
 
-test("PATCH /tasks/:id/status enforces state machine", async () => {
+test("PATCH /tasks/:id/status rejects invalid state transition", async () => {
   const { server, baseUrl } = await startServer();
 
   try {
@@ -141,7 +156,20 @@ test("PATCH /tasks/:id/status enforces state machine", async () => {
       body: JSON.stringify({ status: "SUCCEEDED" }),
     });
 
-    assert.equal(invalid.status, 500);
+    assert.equal(invalid.status, 400);
+    assert.equal((await invalid.json()).code, "BAD_REQUEST");
+  } finally {
+    server.close();
+  }
+});
+
+test("unknown route returns structured 404", async () => {
+  const { server, baseUrl } = await startServer();
+
+  try {
+    const response = await fetch(`${baseUrl}/unknown`);
+    assert.equal(response.status, 404);
+    assert.equal((await response.json()).code, "NOT_FOUND");
   } finally {
     server.close();
   }
