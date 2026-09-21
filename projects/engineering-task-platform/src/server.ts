@@ -1,8 +1,11 @@
 import { createServer } from "node:http";
 import { createApplication } from "./infrastructure/composition-root.js";
 import { checkReadiness, getHealth } from "./application/health-service.js";
+import { TaskApiService } from "./application/task-api-service.js";
+import { handleTaskRoutes } from "./http/task-routes.js";
 
 const { config, container, pool } = createApplication();
+const taskApi = new TaskApiService(container.tasks);
 
 const server = createServer(async (request, response) => {
   response.setHeader("content-type", "application/json");
@@ -19,6 +22,9 @@ const server = createServer(async (request, response) => {
     response.end(JSON.stringify(readiness));
     return;
   }
+
+  const handled = await handleTaskRoutes(request, response, taskApi);
+  if (handled) return;
 
   response.writeHead(404);
   response.end(JSON.stringify({ error: "Not found" }));
