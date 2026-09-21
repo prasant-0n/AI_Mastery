@@ -1,10 +1,42 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
+import { AuthService } from "../src/application/auth-service.js";
+import { TokenService } from "../src/application/token-service.js";
 import { TaskApiService } from "../src/application/task-api-service.js";
 import type { Task } from "../src/domain/task.js";
-import type { TaskRepository } from "../src/application/repositories.js";
+import type { User } from "../src/domain/user.js";
+import type { UserRepository, TaskRepository } from "../src/application/repositories.js";
 import { createHttpServer } from "../src/http/server-app.js";
+
+class InMemoryUserRepository implements UserRepository {
+  private readonly store = new Map<string, User>();
+
+  public async create(user: User): Promise<void> {
+    this.store.set(user.id, user);
+  }
+
+  public async findById(id: string): Promise<User | null> {
+    return this.store.get(id) ?? null;
+  }
+
+  public async findByEmail(email: string): Promise<User | null> {
+    return [...this.store.values()].find(
+      (user) => user.email === email.trim().toLowerCase(),
+    ) ?? null;
+  }
+
+  public async findByOrganizationAndEmail(
+    organizationId: string,
+    email: string,
+  ): Promise<User | null> {
+    return [...this.store.values()].find(
+      (user) =>
+        user.organizationId === organizationId &&
+        user.email === email.trim().toLowerCase(),
+    ) ?? null;
+  }
+}
 
 class InMemoryTaskRepository implements TaskRepository {
   private readonly store = new Map<string, Task>();
@@ -32,10 +64,26 @@ class InMemoryTaskRepository implements TaskRepository {
   }
 }
 
+const secret = "0123456789abcdef0123456789abcdef";
+
 async function startServer() {
+  const users = new InMemoryUserRepository();
+  const tokens = new TokenService(secret);
+  const auth = new AuthService(users, tokens);
   const service = new TaskApiService(new InMemoryTaskRepository());
+
+  await auth.register({
+    id: "user-1",
+    organizationId: "org-1",
+    email: "user@example.com",
+    password: "correct horse battery staple",
+  });
+
   const server = createHttpServer(
     service,
+    auth,
+    users,
+    tokens,
     async () => ({ status: "ready", database: "up" }),
   );
 
@@ -45,9 +93,26 @@ async function startServer() {
   const address = server.address();
   assert.ok(address && typeof address === "object");
 
+  const login = await fetch(
+    "http://127.0.0.1:" + address.port + "/auth/login",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        organizationId: "org-1",
+        email: "user@example.com",
+        password: "correct horse battery staple",
+      }),
+    },
+  );
+
+  assert.equal(login.status, 200);
+  const loginBody = await login.json();
+
   return {
     server,
-    baseUrl: `http://127.0.0.1:${address.port}`,
+    baseUrl: "http://127.0.0.1:" + address.port,
+    accessToken: loginBody.accessToken as string,
   };
 }
 
@@ -55,7 +120,7 @@ test("GET /health returns service health", async () => {
   const { server, baseUrl } = await startServer();
 
   try {
-    const response = await fetch(`${baseUrl}/health`);
+    const response = await fetch(baseUrl + "/health");
     assert.equal(response.status, 200);
     assert.deepEqual(await response.json(), {
       status: "ok",
@@ -70,7 +135,7 @@ test("GET /ready reports readiness", async () => {
   const { server, baseUrl } = await startServer();
 
   try {
-    const response = await fetch(`${baseUrl}/ready`);
+    const response = await fetch(baseUrl + "/ready");
     assert.equal(response.status, 200);
     assert.deepEqual(await response.json(), {
       status: "ready",
@@ -81,38 +146,38 @@ test("GET /ready reports readiness", async () => {
   }
 });
 
-test("POST /tasks creates a task", async () => {
+test("POST /auth/login returns an access token", async () => {
   const { server, baseUrl } = await startServer();
 
   try {
-    const response = await fetch(`${baseUrl}/tasks`, {
+    const response = await fetch(baseUrl + "/auth/login", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         organizationId: "org-1",
-        createdBy: "user-1",
-        type: "document",
+        email: "user@example.com",
+        password: "correct horse battery staple",
       }),
     });
 
-    assert.equal(response.status, 201);
-
+    assert.equal(response.status, 200);
     const body = await response.json();
-    assert.equal(body.organizationId, "org-1");
-    assert.equal(body.status, "PENDING");
+    assert.equal(body.userId, "user-1");
+    assert.equal(typeof body.accessToken, "string");
+    assert.equal("passwordHash" in body, false);
   } finally {
     server.close();
   }
 });
 
-test("POST /tasks rejects malformed JSON", async () => {
+test("POST /tasks requires authentication", async () => {
   const { server, baseUrl } = await startServer();
 
   try {
-    const response = await fetch(`${baseUrl}/tasks`, {
+    const response = await fetch(baseUrl + "/tasks", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: "{invalid",
+      body: JSON.stringify({ type: "document" }),
     });
 
     assert.equal(response.status, 400);
@@ -122,42 +187,57 @@ test("POST /tasks rejects malformed JSON", async () => {
   }
 });
 
-test("GET /tasks/:id returns 404 for unknown task", async () => {
-  const { server, baseUrl } = await startServer();
+test("POST /tasks derives tenant identity from authentication", async () => {
+  const { server, baseUrl, accessToken } = await startServer();
 
   try {
-    const response = await fetch(`${baseUrl}/tasks/missing`);
-    assert.equal(response.status, 404);
-    assert.equal((await response.json()).code, "NOT_FOUND");
+    const response = await fetch(baseUrl + "/tasks", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer " + accessToken,
+      },
+      body: JSON.stringify({
+        organizationId: "attacker-org",
+        createdBy: "attacker-user",
+        type: "document",
+      }),
+    });
+
+    assert.equal(response.status, 201);
+    const body = await response.json();
+
+    assert.equal(body.organizationId, "org-1");
+    assert.equal(body.createdBy, "user-1");
   } finally {
     server.close();
   }
 });
 
-test("PATCH /tasks/:id/status rejects invalid state transition", async () => {
+test("GET /tasks/:id requires authentication", async () => {
   const { server, baseUrl } = await startServer();
 
   try {
-    const created = await fetch(`${baseUrl}/tasks`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        organizationId: "org-1",
-        createdBy: "user-1",
-        type: "document",
-      }),
-    });
+    const response = await fetch(baseUrl + "/tasks/missing");
+    assert.equal(response.status, 400);
+    assert.equal((await response.json()).code, "BAD_REQUEST");
+  } finally {
+    server.close();
+  }
+});
 
-    const task = await created.json();
+test("PATCH /tasks/:id/status requires authentication", async () => {
+  const { server, baseUrl } = await startServer();
 
-    const invalid = await fetch(`${baseUrl}/tasks/${task.id}/status`, {
+  try {
+    const response = await fetch(baseUrl + "/tasks/task-1/status", {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ status: "SUCCEEDED" }),
+      body: JSON.stringify({ status: "QUEUED" }),
     });
 
-    assert.equal(invalid.status, 400);
-    assert.equal((await invalid.json()).code, "BAD_REQUEST");
+    assert.equal(response.status, 400);
+    assert.equal((await response.json()).code, "BAD_REQUEST");
   } finally {
     server.close();
   }
@@ -167,7 +247,7 @@ test("unknown route returns structured 404", async () => {
   const { server, baseUrl } = await startServer();
 
   try {
-    const response = await fetch(`${baseUrl}/unknown`);
+    const response = await fetch(baseUrl + "/unknown");
     assert.equal(response.status, 404);
     assert.equal((await response.json()).code, "NOT_FOUND");
   } finally {
