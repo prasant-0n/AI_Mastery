@@ -7,8 +7,10 @@ import { parsePagination, parseTaskStatus, requireNonEmptyString } from "../appl
 import type { UserRepository } from "../application/repositories.js";
 import type { TokenService } from "../application/token-service.js";
 import { readJsonBody } from "./request-body.js";
+import { failure, success } from "./api-response.js";
 
-function sendJson(response: ServerResponse, status: number, body: unknown): void {
+function sendJson(response: ServerResponse, status: number, body: unknown, requestId: string): void {
+  response.setHeader("x-request-id", requestId);
   response.writeHead(status, { "content-type": "application/json" });
   response.end(JSON.stringify(body));
 }
@@ -23,6 +25,7 @@ export async function handleTaskRoutes(
   tasks: TaskApiService,
   users: UserRepository,
   tokens: TokenService,
+  requestId: string,
 ): Promise<boolean> {
   if (!request.url) return false;
 
@@ -38,19 +41,16 @@ export async function handleTaskRoutes(
 
     if (request.method === "POST" && parts.length === 1 && parts[0] === "tasks") {
       const body = await readJsonBody(request);
-
       if (!body || typeof body !== "object") {
         throw new ApplicationError("Request body must be an object", "BAD_REQUEST");
       }
 
-      const input = body as Record<string, unknown>;
-
       const task = await tasks.create(authenticated, {
         id: randomUUID(),
-        type: requireNonEmptyString(input.type, "type"),
+        type: requireNonEmptyString((body as Record<string, unknown>).type, "type"),
       });
 
-      sendJson(response, 201, task);
+      sendJson(response, 201, success(task, requestId), requestId);
       return true;
     }
 
@@ -59,7 +59,7 @@ export async function handleTaskRoutes(
         authenticated,
         requireNonEmptyString(parts[1], "taskId"),
       );
-      sendJson(response, 200, task);
+      sendJson(response, 200, success(task, requestId), requestId);
       return true;
     }
 
@@ -70,15 +70,13 @@ export async function handleTaskRoutes(
       parts[2] === "tasks"
     ) {
       const organizationId = requireNonEmptyString(parts[1], "organizationId");
-
       if (organizationId !== authenticated.organizationId) {
-        throw new ApplicationError("Organization access denied", "NOT_FOUND");
+        throw new ApplicationError("Organization access denied", "FORBIDDEN");
       }
 
       const { limit, offset } = parsePagination(url.searchParams);
       const result = await tasks.list(authenticated, limit, offset);
-
-      sendJson(response, 200, { data: result, limit, offset });
+      sendJson(response, 200, success({ data: result, limit, offset }, requestId), requestId);
       return true;
     }
 
@@ -89,7 +87,6 @@ export async function handleTaskRoutes(
       parts[2] === "status"
     ) {
       const body = await readJsonBody(request);
-
       if (!body || typeof body !== "object") {
         throw new ApplicationError("Request body must be an object", "BAD_REQUEST");
       }
@@ -101,14 +98,19 @@ export async function handleTaskRoutes(
         status,
       );
 
-      sendJson(response, 200, task);
+      sendJson(response, 200, success(task, requestId), requestId);
       return true;
     }
 
     return false;
   } catch (error) {
     const mapped = toHttpError(error);
-    sendJson(response, mapped.status, mapped.body);
+    sendJson(
+      response,
+      mapped.status,
+      failure(mapped.body.error, mapped.body.code, requestId),
+      requestId,
+    );
     return true;
   }
 }
