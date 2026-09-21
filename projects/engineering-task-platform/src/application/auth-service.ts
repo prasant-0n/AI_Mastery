@@ -1,6 +1,7 @@
 import { ApplicationError } from "./http-errors.js";
 import { hashPassword, verifyPassword } from "./password-hashing.js";
 import type { UserRepository } from "./repositories.js";
+import type { TokenService } from "./token-service.js";
 
 export interface RegisterUserInput {
   readonly id: string;
@@ -10,7 +11,10 @@ export interface RegisterUserInput {
 }
 
 export class AuthService {
-  public constructor(private readonly users: UserRepository) {}
+  public constructor(
+    private readonly users: UserRepository,
+    private readonly tokens: TokenService,
+  ) {}
 
   public async register(input: RegisterUserInput) {
     if (input.password.length < 8) {
@@ -20,9 +24,12 @@ export class AuthService {
       );
     }
 
-    const existing = await this.users.findByEmail(input.email);
+    const existing = await this.users.findByOrganizationAndEmail(
+      input.organizationId,
+      input.email,
+    );
 
-    if (existing && existing.organizationId === input.organizationId) {
+    if (existing) {
       throw new ApplicationError(
         "User email already exists in organization",
         "CONFLICT",
@@ -40,14 +47,27 @@ export class AuthService {
     };
 
     await this.users.create(user);
-    return user;
+
+    return {
+      userId: user.id,
+      organizationId: user.organizationId,
+      email: user.email,
+      accessToken: this.tokens.issue({
+        userId: user.id,
+        organizationId: user.organizationId,
+      }),
+    };
   }
 
-  public async verifyCredentials(
+  public async login(
+    organizationId: string,
     email: string,
     password: string,
   ) {
-    const user = await this.users.findByEmail(email);
+    const user = await this.users.findByOrganizationAndEmail(
+      organizationId,
+      email,
+    );
 
     if (!user || !(await verifyPassword(password, user.passwordHash))) {
       throw new ApplicationError("Invalid credentials", "BAD_REQUEST");
@@ -56,6 +76,11 @@ export class AuthService {
     return {
       userId: user.id,
       organizationId: user.organizationId,
+      email: user.email,
+      accessToken: this.tokens.issue({
+        userId: user.id,
+        organizationId: user.organizationId,
+      }),
     };
   }
 }
