@@ -1,23 +1,29 @@
 import { ApplicationError } from "./http-errors.js";
 import type { UserRepository } from "./repositories.js";
+import type { TokenService, AccessTokenClaims } from "./token-service.js";
 
 export interface AuthenticatedUser {
   readonly userId: string;
   readonly organizationId: string;
 }
 
-export async function requireUser(
-  userId: string,
+export async function authenticateRequest(
+  authorization: string | undefined,
   users: UserRepository,
+  tokens: TokenService,
 ): Promise<AuthenticatedUser> {
-  if (!userId) {
+  if (!authorization?.startsWith("Bearer ")) {
     throw new ApplicationError("Authentication required", "BAD_REQUEST");
   }
 
-  const user = await users.findById(userId);
+  const claims: AccessTokenClaims = tokens.verify(
+    authorization.slice("Bearer ".length),
+  );
 
-  if (!user) {
-    throw new ApplicationError("Authenticated user not found", "NOT_FOUND");
+  const user = await users.findById(claims.userId);
+
+  if (!user || user.organizationId !== claims.organizationId) {
+    throw new ApplicationError("Invalid authenticated identity", "NOT_FOUND");
   }
 
   return {
