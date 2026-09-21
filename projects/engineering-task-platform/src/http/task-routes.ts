@@ -19,6 +19,15 @@ function getPathParts(url: string): string[] {
   return new URL(url, "http://localhost").pathname.split("/").filter(Boolean);
 }
 
+function isTaskRoute(method: string | undefined, parts: string[]): boolean {
+  return (
+    (method === "POST" && parts.length === 1 && parts[0] === "tasks") ||
+    (method === "GET" && parts.length === 2 && parts[0] === "tasks") ||
+    (method === "GET" && parts.length === 3 && parts[0] === "organizations" && parts[2] === "tasks") ||
+    (method === "PATCH" && parts.length === 3 && parts[0] === "tasks" && parts[2] === "status")
+  );
+}
+
 export async function handleTaskRoutes(
   request: IncomingMessage,
   response: ServerResponse,
@@ -31,6 +40,7 @@ export async function handleTaskRoutes(
 
   const url = new URL(request.url, "http://localhost");
   const parts = getPathParts(request.url);
+  if (!isTaskRoute(request.method, parts)) return false;
 
   try {
     const authenticated = await authenticateRequest(
@@ -49,68 +59,42 @@ export async function handleTaskRoutes(
         id: randomUUID(),
         type: requireNonEmptyString((body as Record<string, unknown>).type, "type"),
       });
-
       sendJson(response, 201, success(task, requestId), requestId);
       return true;
     }
 
     if (request.method === "GET" && parts.length === 2 && parts[0] === "tasks") {
-      const task = await tasks.getById(
-        authenticated,
-        requireNonEmptyString(parts[1], "taskId"),
-      );
+      const task = await tasks.getById(authenticated, requireNonEmptyString(parts[1], "taskId"));
       sendJson(response, 200, success(task, requestId), requestId);
       return true;
     }
 
-    if (
-      request.method === "GET" &&
-      parts.length === 3 &&
-      parts[0] === "organizations" &&
-      parts[2] === "tasks"
-    ) {
+    if (request.method === "GET" && parts.length === 3 && parts[0] === "organizations" && parts[2] === "tasks") {
       const organizationId = requireNonEmptyString(parts[1], "organizationId");
       if (organizationId !== authenticated.organizationId) {
         throw new ApplicationError("Organization access denied", "FORBIDDEN");
       }
-
       const { limit, offset } = parsePagination(url.searchParams);
       const result = await tasks.list(authenticated, limit, offset);
       sendJson(response, 200, success({ data: result, limit, offset }, requestId), requestId);
       return true;
     }
 
-    if (
-      request.method === "PATCH" &&
-      parts.length === 3 &&
-      parts[0] === "tasks" &&
-      parts[2] === "status"
-    ) {
-      const body = await readJsonBody(request);
-      if (!body || typeof body !== "object") {
-        throw new ApplicationError("Request body must be an object", "BAD_REQUEST");
-      }
-
-      const status = parseTaskStatus((body as Record<string, unknown>).status);
-      const task = await tasks.transition(
-        authenticated,
-        requireNonEmptyString(parts[1], "taskId"),
-        status,
-      );
-
-      sendJson(response, 200, success(task, requestId), requestId);
-      return true;
+    const body = await readJsonBody(request);
+    if (!body || typeof body !== "object") {
+      throw new ApplicationError("Request body must be an object", "BAD_REQUEST");
     }
-
-    return false;
+    const status = parseTaskStatus((body as Record<string, unknown>).status);
+    const task = await tasks.transition(
+      authenticated,
+      requireNonEmptyString(parts[1], "taskId"),
+      status,
+    );
+    sendJson(response, 200, success(task, requestId), requestId);
+    return true;
   } catch (error) {
     const mapped = toHttpError(error);
-    sendJson(
-      response,
-      mapped.status,
-      failure(mapped.body.error, mapped.body.code, requestId),
-      requestId,
-    );
+    sendJson(response, mapped.status, failure(mapped.body.error, mapped.body.code, requestId), requestId);
     return true;
   }
 }
