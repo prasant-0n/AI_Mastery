@@ -1,28 +1,28 @@
+import { randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { authenticateRequest } from "../application/authentication.js";
 import { ApplicationError, toHttpError } from "../application/http-errors.js";
 import { TaskApiService } from "../application/task-api-service.js";
 import { parsePagination, parseTaskStatus, requireNonEmptyString } from "../application/request-validation.js";
+import type { UserRepository } from "../application/repositories.js";
+import type { TokenService } from "../application/token-service.js";
 import { readJsonBody } from "./request-body.js";
 
-function sendJson(
-  response: ServerResponse,
-  status: number,
-  body: unknown,
-): void {
+function sendJson(response: ServerResponse, status: number, body: unknown): void {
   response.writeHead(status, { "content-type": "application/json" });
   response.end(JSON.stringify(body));
 }
 
 function getPathParts(url: string): string[] {
-  return new URL(url, "http://localhost").pathname
-    .split("/")
-    .filter(Boolean);
+  return new URL(url, "http://localhost").pathname.split("/").filter(Boolean);
 }
 
 export async function handleTaskRoutes(
   request: IncomingMessage,
   response: ServerResponse,
   tasks: TaskApiService,
+  users: UserRepository,
+  tokens: TokenService,
 ): Promise<boolean> {
   if (!request.url) return false;
 
@@ -30,6 +30,12 @@ export async function handleTaskRoutes(
   const parts = getPathParts(request.url);
 
   try {
+    const authenticated = await authenticateRequest(
+      request.headers.authorization,
+      users,
+      tokens,
+    );
+
     if (request.method === "POST" && parts.length === 1 && parts[0] === "tasks") {
       const body = await readJsonBody(request);
 
@@ -39,10 +45,8 @@ export async function handleTaskRoutes(
 
       const input = body as Record<string, unknown>;
 
-      const task = await tasks.create({
-        id: crypto.randomUUID(),
-        organizationId: requireNonEmptyString(input.organizationId, "organizationId"),
-        createdBy: requireNonEmptyString(input.createdBy, "createdBy"),
+      const task = await tasks.create(authenticated, {
+        id: randomUUID(),
         type: requireNonEmptyString(input.type, "type"),
       });
 
@@ -51,7 +55,10 @@ export async function handleTaskRoutes(
     }
 
     if (request.method === "GET" && parts.length === 2 && parts[0] === "tasks") {
-      const task = await tasks.getById(requireNonEmptyString(parts[1], "taskId"));
+      const task = await tasks.getById(
+        authenticated,
+        requireNonEmptyString(parts[1], "taskId"),
+      );
       sendJson(response, 200, task);
       return true;
     }
@@ -63,14 +70,15 @@ export async function handleTaskRoutes(
       parts[2] === "tasks"
     ) {
       const organizationId = requireNonEmptyString(parts[1], "organizationId");
-      const { limit, offset } = parsePagination(url.searchParams);
-      const result = await tasks.list(organizationId, limit, offset);
 
-      sendJson(response, 200, {
-        data: result,
-        limit,
-        offset,
-      });
+      if (organizationId !== authenticated.organizationId) {
+        throw new ApplicationError("Organization access denied", "NOT_FOUND");
+      }
+
+      const { limit, offset } = parsePagination(url.searchParams);
+      const result = await tasks.list(authenticated, limit, offset);
+
+      sendJson(response, 200, { data: result, limit, offset });
       return true;
     }
 
@@ -88,6 +96,7 @@ export async function handleTaskRoutes(
 
       const status = parseTaskStatus((body as Record<string, unknown>).status);
       const task = await tasks.transition(
+        authenticated,
         requireNonEmptyString(parts[1], "taskId"),
         status,
       );
