@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { TaskApiService } from "../src/application/task-api-service.js";
+import type { AuthenticatedUser } from "../src/application/authentication.js";
 import type { Task } from "../src/domain/task.js";
 import type { TaskRepository } from "../src/application/repositories.js";
 
@@ -31,38 +32,76 @@ class InMemoryTaskRepository implements TaskRepository {
   }
 }
 
+const userA: AuthenticatedUser = {
+  userId: "user-a",
+  organizationId: "org-a",
+};
+
+const userB: AuthenticatedUser = {
+  userId: "user-b",
+  organizationId: "org-b",
+};
+
 function createService(): TaskApiService {
   return new TaskApiService(new InMemoryTaskRepository());
 }
 
-test("creates and retrieves a task", async () => {
+test("creates a task from authenticated tenant identity", async () => {
   const service = createService();
 
-  const created = await service.create({
+  const created = await service.create(userA, {
     id: "task-1",
-    organizationId: "org-1",
-    createdBy: "user-1",
     type: "integration_test",
   });
 
-  const loaded = await service.getById(created.id);
+  assert.equal(created.organizationId, "org-a");
+  assert.equal(created.createdBy, "user-a");
+  assert.equal(created.status, "PENDING");
+});
 
-  assert.deepEqual(loaded, created);
-  assert.equal(loaded.status, "PENDING");
+test("prevents one organization from reading another organization's task", async () => {
+  const service = createService();
+
+  await service.create(userA, {
+    id: "task-private",
+    type: "integration_test",
+  });
+
+  await assert.rejects(
+    () => service.getById(userB, "task-private"),
+    /Task not found/,
+  );
+});
+
+test("prevents cross-tenant listing", async () => {
+  const service = createService();
+
+  await service.create(userA, {
+    id: "task-org-a",
+    type: "test",
+  });
+
+  await service.create(userB, {
+    id: "task-org-b",
+    type: "test",
+  });
+
+  const tasks = await service.list(userA, 20, 0);
+
+  assert.equal(tasks.length, 1);
+  assert.equal(tasks[0]?.organizationId, "org-a");
 });
 
 test("rejects invalid state transitions", async () => {
   const service = createService();
 
-  await service.create({
+  await service.create(userA, {
     id: "task-2",
-    organizationId: "org-1",
-    createdBy: "user-1",
     type: "integration_test",
   });
 
   await assert.rejects(
-    () => service.transition("task-2", "SUCCEEDED"),
+    () => service.transition(userA, "task-2", "SUCCEEDED"),
     /Invalid task transition/,
   );
 });
@@ -70,41 +109,16 @@ test("rejects invalid state transitions", async () => {
 test("allows valid state transitions", async () => {
   const service = createService();
 
-  await service.create({
+  await service.create(userA, {
     id: "task-3",
-    organizationId: "org-1",
-    createdBy: "user-1",
     type: "integration_test",
   });
 
-  const queued = await service.transition("task-3", "QUEUED");
-  const running = await service.transition("task-3", "RUNNING");
-  const succeeded = await service.transition("task-3", "SUCCEEDED");
+  const queued = await service.transition(userA, "task-3", "QUEUED");
+  const running = await service.transition(userA, "task-3", "RUNNING");
+  const succeeded = await service.transition(userA, "task-3", "SUCCEEDED");
 
   assert.equal(queued.status, "QUEUED");
   assert.equal(running.status, "RUNNING");
   assert.equal(succeeded.status, "SUCCEEDED");
-});
-
-test("lists only tasks belonging to the requested organization", async () => {
-  const service = createService();
-
-  await service.create({
-    id: "task-org-a",
-    organizationId: "org-a",
-    createdBy: "user-a",
-    type: "test",
-  });
-
-  await service.create({
-    id: "task-org-b",
-    organizationId: "org-b",
-    createdBy: "user-b",
-    type: "test",
-  });
-
-  const tasks = await service.list("org-a", 20, 0);
-
-  assert.equal(tasks.length, 1);
-  assert.equal(tasks[0]?.organizationId, "org-a");
 });
