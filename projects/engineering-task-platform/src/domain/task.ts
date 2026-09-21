@@ -1,3 +1,5 @@
+import { DomainInvariantError } from "./errors.js";
+
 export const TASK_STATUSES = [
   "PENDING",
   "QUEUED",
@@ -37,15 +39,50 @@ export function canTransition(from: TaskStatus, to: TaskStatus): boolean {
 export function transitionTask(
   task: Task,
   nextStatus: TaskStatus,
+  now = new Date(),
 ): Task {
   if (!canTransition(task.status, nextStatus)) {
-    throw new Error(
+    throw new DomainInvariantError(
       `Invalid task transition: ${task.status} -> ${nextStatus}`,
     );
   }
 
-  return {
+  if (Number.isNaN(now.getTime())) {
+    throw new DomainInvariantError("Task transition time must be valid");
+  }
+
+  const next: Task = {
     ...task,
     status: nextStatus,
   };
+
+  if (nextStatus === "RUNNING") {
+    return {
+      ...next,
+      attemptCount: task.attemptCount + 1,
+      startedAt: now,
+      completedAt: undefined,
+    };
+  }
+
+  if (nextStatus === "QUEUED") {
+    return {
+      ...next,
+      startedAt: undefined,
+      completedAt: undefined,
+    };
+  }
+
+  if (
+    nextStatus === "SUCCEEDED" ||
+    nextStatus === "FAILED" ||
+    nextStatus === "CANCELLED"
+  ) {
+    return {
+      ...next,
+      completedAt: now,
+    };
+  }
+
+  return next;
 }
